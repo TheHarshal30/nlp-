@@ -1,6 +1,7 @@
 gensim==4.3.2
+numpy==1.26.4
+scipy==1.12.0
 torch
 tqdm
 nltk
-numpy
 requests

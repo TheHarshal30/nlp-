@@ -107,6 +107,51 @@ python training/03_align_ntxent.py \
 
 ---
 
+## Step 4 — Probe Frozen Embeddings
+
+This stage does not train or modify the Word2Vec embeddings. It trains small
+CPU-only models on top of frozen phrase vectors to evaluate whether UMLS
+synonyms are already separable in the embedding space.
+
+### MLP classifier probe
+
+```bash
+python training/04_probe_word2vec.py \
+    --w2v_bin models/word2vec/weights/word2vec.bin \
+    --pairs data/umls_pairs.txt \
+    --model mlp \
+    --loss bce \
+    --batch_size 256 \
+    --epochs 8 \
+    --lr 1e-3 \
+    --num_threads 8 \
+    --output models/probes/mlp_probe.pt \
+    --metrics_out models/probes/mlp_metrics.json
+```
+
+### Siamese probe with contrastive loss
+
+```bash
+python training/04_probe_word2vec.py \
+    --w2v_bin models/word2vec/weights/word2vec.bin \
+    --pairs data/umls_pairs.txt \
+    --model siamese \
+    --loss contrastive \
+    --batch_size 256 \
+    --epochs 8 \
+    --lr 1e-3 \
+    --num_threads 8 \
+    --output models/probes/siamese_probe.pt \
+    --metrics_out models/probes/siamese_metrics.json
+```
+
+Probe outputs include validation/test accuracy, ROC-AUC, precision, and recall.
+The script caches normalized phrase vectors in RAM, keeps the probe model on CPU,
+and maintains a 1:1 positive/negative ratio by generating one random negative
+for every positive pair.
+
+---
+
 ## Output layout
 
 After all three steps, the folder structure should match the contract in `CONTRIBUTING_MODELS.md`:
