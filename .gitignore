@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+.venv/
+.venv_local/
+
+data/
+META/
+
+models/word2vec/weights/*.bin
+models/word2vec_umls/weights/*.bin
+models/word2vec_umls/weights/*.json
+
