@@ -14,19 +14,19 @@
   },
   "trainer": {
     "epochs": 5,
-    "batch_size": 64,
+    "batch_size": 128,
     "lr": 0.0005,
     "num_threads": 8,
     "checkpoint_every": 1,
     "resume": false
   },
   "model": {
-    "hidden_size": 256,
-    "num_layers": 4,
+    "hidden_size": 128,
+    "num_layers": 2,
     "num_heads": 4,
-    "ffn_dim": 512,
+    "ffn_dim": 256,
     "dropout": 0.1,
-    "max_length": 64,
+    "max_length": 32,
     "pooling": "cls",
     "mask_probability": 0.15
   },
