@@ -12,4 +12,3 @@ models/word2vec/weights/*.bin
 models/word2vec_umls/weights/*.bin
 models/word2vec_umls/weights/*.json
 models/probes/
-results/
