@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+import argparse
+from embedding_training_v2.src.config import load_config
+from embedding_training_v2.src.tasks import train_transformer_task
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    args = parser.parse_args()
+    train_transformer_task(load_config(args.config))
+
+
+if __name__ == "__main__":
+    main()
