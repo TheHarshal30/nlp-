@@ -150,6 +150,27 @@ The script caches normalized phrase vectors in RAM, keeps the probe model on CPU
 and maintains a 1:1 positive/negative ratio by generating one random negative
 for every positive pair.
 
+### Strict diagnostics
+
+This project also includes a stricter phrase-level diagnostic suite that
+rebuilds train/validation/test splits from disjoint phrase sets, calibrates
+thresholds on the validation set, compares cosine versus learned probes, checks
+order invariance, and reruns the task with hard negatives.
+
+```bash
+python training/05_probe_diagnostics.py \
+    --w2v_bin models/word2vec/weights/word2vec.bin \
+    --pairs data/umls_pairs.txt \
+    --results_dir results \
+    --epochs 5 \
+    --batch_size 256 \
+    --lr 1e-3 \
+    --num_threads 8
+```
+
+Artifacts are written under `results/` as JSON metrics, SVG ROC/training plots,
+and `results/final_report.md`.
+
 ---
 
 ## Output layout
