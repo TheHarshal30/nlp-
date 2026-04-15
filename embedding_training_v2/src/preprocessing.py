@@ -51,10 +51,18 @@ def materialize_corpus(pubmed_dir: str, output_path: str, tokenizer: SimpleToken
             handle.write(json.dumps(tokens) + "\n")
 
 
-def load_tokenized_corpus(path: str):
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line in handle:
-            yield json.loads(line)
+class TokenizedCorpus:
+    def __init__(self, path: str):
+        self.path = Path(path)
+
+    def __iter__(self):
+        with self.path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                yield json.loads(line)
+
+
+def load_tokenized_corpus(path: str) -> TokenizedCorpus:
+    return TokenizedCorpus(path)
 
 
 def build_vocabulary(corpus_path: str, vocab_path: str, min_freq: int, max_vocab_size: int | None = None) -> dict:
@@ -121,4 +129,3 @@ def extract_umls_pairs(
                         break
                 if emitted >= max_pairs_per_cui:
                     break
-
