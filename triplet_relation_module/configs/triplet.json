@@ -1,0 +1,35 @@
+{
+  "seed": 42,
+  "base_model": "transformer",
+  "base_model_path": "embedding_training_v2/outputs/models/transformer_fast",
+  "relations_file": "META/MRREL.RRF",
+  "mrconso_file": "META/MRCONSO.RRF",
+  "allowed_relations": [
+    "may_treat",
+    "has_finding_site",
+    "has_manifestation"
+  ],
+  "output_root": "triplet_relation_module/outputs/models/triplet_relation",
+  "data_root": "triplet_relation_module/data",
+  "batch_size": 256,
+  "epochs": 2,
+  "margin": 0.5,
+  "lr": 0.0003,
+  "weight_decay": 0.0001,
+  "freeze_base": true,
+  "projection_dim": 256,
+  "relation_dim": 64,
+  "distance": "cosine",
+  "train_split": 0.8,
+  "val_split": 0.1,
+  "num_workers": 0,
+  "negative_sampling": {
+    "strategy": "hard",
+    "pool_size": 32,
+    "random_seed": 42
+  },
+  "evaluation": {
+    "relation": "may_treat",
+    "candidate_batch_size": 512
+  }
+}
