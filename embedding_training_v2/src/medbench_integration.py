@@ -116,7 +116,7 @@ class {class_name}(BaseEmbedder):
         with open(vocab_path, 'r', encoding='utf-8') as handle:
             payload = json.load(handle)
         tokens = payload['special_tokens'] + payload['tokens']
-        self.vocab = {token: idx for idx, token in enumerate(tokens)}
+        self.vocab = {{token: idx for idx, token in enumerate(tokens)}}
         cfg = self.metadata['model_config']
         self.model = TransformerEncoderModel(
             vocab_size=len(tokens),
