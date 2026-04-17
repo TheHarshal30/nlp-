@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+from embedding_training_v2.src.medbench_integration import prepare_models
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Copy trained embedding exports into a MedBench clone.")
+    parser.add_argument("--medbench-root", required=True, help="Path to the cloned medical-entity-linking repository.")
+    parser.add_argument(
+        "--models",
+        nargs="*",
+        choices=["word2vec", "word2vec_umls", "transformer", "transformer_umls"],
+        default=["word2vec", "word2vec_umls", "transformer", "transformer_umls"],
+        help="Subset of models to prepare.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    prepared = prepare_models(Path(args.medbench_root), args.models)
+    for model_name, model_dir in prepared.items():
+        print(f"{model_name}: prepared at {model_dir}")
+    print("Model preparation completed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

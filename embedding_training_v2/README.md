@@ -77,8 +77,31 @@ class ModelName(BaseEmbedder):
 
 ```bash
 git clone https://github.com/dz016/medical-entity-linking.git
-cp -r embedding_training_v2/outputs/models/<model_name> medical-entity-linking/models/
-cd medical-entity-linking/evaluation
-python run_all.py --model <model_name>
+python scripts/prepare_medbench_models --medbench-root medical-entity-linking
+python scripts/run_medbench_benchmarks --medbench-root medical-entity-linking
 ```
 
+`prepare_medbench_models` copies the trained exports into `medical-entity-linking/models/<model_name>/` using the canonical model names:
+
+- `word2vec`
+- `word2vec_umls`
+- `transformer`
+- `transformer_umls`
+
+It also rewrites `model.py` in each destination folder from the current export contract, so existing trained `*_fast` artifacts can be evaluated without retraining.
+
+`run_medbench_benchmarks` performs:
+
+- model preparation
+- preflight encode validation inside the MedBench layout
+- `python run_all.py --model <model_name>` for each selected model
+- result aggregation into `medical-entity-linking/results/embedding_benchmark_summary.json`
+- a markdown comparison table at `medical-entity-linking/results/embedding_benchmark_summary.md`
+
+Example subset run:
+
+```bash
+python scripts/run_medbench_benchmarks \
+  --medbench-root medical-entity-linking \
+  --models transformer transformer_umls
+```
