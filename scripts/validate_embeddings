@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+import argparse
+import importlib.util
+import inspect
+import json
+import os
+import sys
+import time
+import types
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+
+TEST_TEXTS = [
+    "diabetes mellitus",
+    "insulin therapy",
+    "heart failure",
+]
+SIMILARITY_TEXTS = [
+    "diabetes mellitus",
+    "insulin therapy",
+    "random unrelated text",
+]
+ZERO_NORM_THRESHOLD = 1e-6
+VARIANCE_THRESHOLD = 1e-8
+CONSISTENCY_ATOL = 1e-6
+CONSISTENCY_RTOL = 1e-5
+
+
+class ValidationError(RuntimeError):
+    pass
+
+
+@dataclass
+class ModelSpec:
+    name: str
+    candidates: list[Path]
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def model_specs(root: Path) -> list[ModelSpec]:
+    return [
+        ModelSpec("word2vec", [root / "embedding_training_v2" / "outputs" / "models" / "word2vec"]),
+        ModelSpec("word2vec_umls", [root / "embedding_training_v2" / "outputs" / "models" / "word2vec_umls"]),
+        ModelSpec(
+            "transformer",
+            [
+                root / "embedding_training_v2" / "outputs" / "models" / "transformer",
+                root / "embedding_training_v2" / "outputs" / "models" / "transformer_fast",
+            ],
+        ),
+        ModelSpec("transformer_umls", [root / "embedding_training_v2" / "outputs" / "models" / "transformer_umls"]),
+    ]
+
+
+def install_base_embedder_stub() -> None:
+    if "base_embedder" in sys.modules:
+        return
+    module = types.ModuleType("base_embedder")
+
+    class BaseEmbedder:
+        def load(self, model_path):
+            raise NotImplementedError
+
+        def encode(self, texts, batch_size=32):
+            raise NotImplementedError
+
+        @property
+        def name(self):
+            return self.__class__.__name__
+
+    module.BaseEmbedder = BaseEmbedder
+    sys.modules["base_embedder"] = module
+
+
+def resolve_model_path(spec: ModelSpec) -> Path:
+    for candidate in spec.candidates:
+        if candidate.exists():
+            return candidate
+    raise ValidationError(
+        f"missing model export directory; checked: {', '.join(str(path) for path in spec.candidates)}"
+    )
+
+
+def import_embedder_class(model_path: Path):
+    model_file = model_path / "model.py"
+    if not model_file.exists():
+        raise ValidationError(f"missing model file: {model_file}")
+
+    install_base_embedder_stub()
+    module_name = f"validated_model_{model_path.name}"
+    spec = importlib.util.spec_from_file_location(module_name, model_file)
+    if spec is None or spec.loader is None:
+        raise ValidationError(f"unable to import model module from {model_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    for _, obj in inspect.getmembers(module, inspect.isclass):
+        if obj.__module__ != module.__name__:
+            continue
+        if hasattr(obj, "load") and hasattr(obj, "encode"):
+            return obj
+    raise ValidationError(f"no embedder class with load()/encode() found in {model_file}")
+
+
+def load_embedder(model_path: Path):
+    embedder_cls = import_embedder_class(model_path)
+    embedder = embedder_cls()
+    embedder.load(str(model_path))
+    return embedder
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
+    if denom <= ZERO_NORM_THRESHOLD:
+        return 0.0
+    return float(np.dot(a, b) / denom)
+
+
+def run_check(name: str, fn):
+    try:
+        detail = fn()
+        if detail:
+            return ("PASS", detail)
+        return ("PASS", None)
+    except Exception as exc:
+        return ("FAIL", str(exc))
+
+
+def validate_output_shape(output: np.ndarray, expected_rows: int) -> str:
+    if output.ndim != 2:
+        raise ValidationError(f"expected 2D array, got shape {output.shape}")
+    if output.shape[0] != expected_rows:
+        raise ValidationError(f"expected {expected_rows} rows, got shape {output.shape}")
+    if output.shape[1] <= 0:
+        raise ValidationError(f"embedding dimension must be positive, got shape {output.shape}")
+    return f"shape={output.shape}"
+
+
+def validate_output_type(output) -> str:
+    if not isinstance(output, np.ndarray):
+        raise ValidationError(f"expected numpy.ndarray, got {type(output).__name__}")
+    return f"dtype={output.dtype}"
+
+
+def validate_numeric(output: np.ndarray) -> str:
+    if np.isnan(output).any():
+        raise ValidationError("output contains NaN values")
+    if np.isinf(output).any():
+        raise ValidationError("output contains infinite values")
+    return None
+
+
+def validate_zero_vectors(output: np.ndarray) -> str:
+    norms = np.linalg.norm(output, axis=1)
+    bad = np.where(norms <= ZERO_NORM_THRESHOLD)[0]
+    if bad.size:
+        raise ValidationError(
+            f"{bad.size}/{len(output)} vectors have norm <= {ZERO_NORM_THRESHOLD:g}; indices={bad.tolist()}"
+        )
+    return f"min_norm={float(norms.min()):.6g}"
+
+
+def validate_variance(output: np.ndarray) -> str:
+    variance = output.var(axis=0)
+    mean_variance = float(variance.mean())
+    max_variance = float(variance.max())
+    if max_variance <= VARIANCE_THRESHOLD:
+        raise ValidationError(
+            f"embedding variance collapsed; mean_var={mean_variance:.6g}, max_var={max_variance:.6g}"
+        )
+    return f"mean_var={mean_variance:.6g}"
+
+
+def validate_similarity(embedder) -> str:
+    outputs = embedder.encode(SIMILARITY_TEXTS)
+    validate_output_type(outputs)
+    validate_output_shape(outputs, len(SIMILARITY_TEXTS))
+    validate_numeric(outputs)
+    validate_zero_vectors(outputs)
+    similar = cosine_similarity(outputs[0], outputs[1])
+    unrelated = cosine_similarity(outputs[0], outputs[2])
+    if similar <= unrelated:
+        raise ValidationError(
+            f"expected sim(diabetes, insulin) > sim(diabetes, unrelated), got {similar:.6f} <= {unrelated:.6f}"
+        )
+    return f"similar={similar:.6f}, unrelated={unrelated:.6f}"
+
+
+def validate_batch_consistency(embedder, texts: list[str]) -> str:
+    first = embedder.encode(texts)
+    second = embedder.encode(texts)
+    if first.shape != second.shape:
+        raise ValidationError(f"repeated encodes returned different shapes: {first.shape} vs {second.shape}")
+    if not np.allclose(first, second, atol=CONSISTENCY_ATOL, rtol=CONSISTENCY_RTOL):
+        delta = float(np.max(np.abs(first - second)))
+        raise ValidationError(f"repeated encodes are unstable; max_abs_diff={delta:.6g}")
+    return f"max_abs_diff={float(np.max(np.abs(first - second))):.6g}"
+
+
+def measure_throughput(embedder, batch_size: int, text: str) -> str:
+    batch = [text] * batch_size
+    started = time.perf_counter()
+    output = embedder.encode(batch, batch_size=batch_size)
+    elapsed = time.perf_counter() - started
+    validate_output_type(output)
+    validate_output_shape(output, batch_size)
+    validate_numeric(output)
+    per_item_ms = (elapsed / batch_size) * 1000.0
+    return f"batch={batch_size}, total={elapsed:.4f}s, per_item={per_item_ms:.3f}ms"
+
+
+def validate_model(spec: ModelSpec, throughput_batch_size: int, skip_throughput: bool) -> tuple[Path | None, dict[str, tuple[str, str | None]]]:
+    results: dict[str, tuple[str, str | None]] = {}
+    model_path: Path | None = None
+    embedder = None
+
+    load_status, load_detail = run_check("Load", lambda: None)
+    try:
+        model_path = resolve_model_path(spec)
+        embedder = load_embedder(model_path)
+        meta_file = model_path / "metadata.json"
+        if meta_file.exists():
+            json.loads(meta_file.read_text(encoding="utf-8"))
+        load_detail = str(model_path)
+    except Exception as exc:
+        load_status, load_detail = ("FAIL", str(exc))
+    results["Load"] = (load_status, load_detail)
+    if load_status == "FAIL":
+        return model_path, results
+
+    encode_status, encode_detail = run_check("Encode", lambda: None)
+    outputs = None
+    try:
+        outputs = embedder.encode(TEST_TEXTS)
+        encode_detail = f"encoded {len(TEST_TEXTS)} texts"
+    except Exception as exc:
+        encode_status, encode_detail = ("FAIL", str(exc))
+    results["Encode"] = (encode_status, encode_detail)
+    if encode_status == "FAIL":
+        return model_path, results
+
+    ordered_checks = [
+        ("Type", lambda: validate_output_type(outputs)),
+        ("Shape", lambda: validate_output_shape(outputs, len(TEST_TEXTS))),
+        ("NaN/Inf", lambda: validate_numeric(outputs)),
+        ("Zero vectors", lambda: validate_zero_vectors(outputs)),
+        ("Variance", lambda: validate_variance(outputs)),
+        ("Similarity sanity", lambda: validate_similarity(embedder)),
+        ("Batch consistency", lambda: validate_batch_consistency(embedder, TEST_TEXTS)),
+    ]
+
+    for label, fn in ordered_checks:
+        status, detail = run_check(label, fn)
+        results[label] = (status, detail)
+        if status == "FAIL":
+            return model_path, results
+
+    if skip_throughput:
+        results["Throughput"] = ("SKIP", "disabled by flag")
+    else:
+        status, detail = run_check(
+            "Throughput",
+            lambda: measure_throughput(embedder, throughput_batch_size, TEST_TEXTS[0]),
+        )
+        results["Throughput"] = (status, detail)
+        if status == "FAIL":
+            return model_path, results
+
+    return model_path, results
+
+
+def overall_status(results: dict[str, tuple[str, str | None]]) -> str:
+    return "PASS" if all(status == "PASS" or status == "SKIP" for status, _ in results.values()) else "FAIL"
+
+
+def print_report(spec: ModelSpec, model_path: Path | None, results: dict[str, tuple[str, str | None]]) -> None:
+    print(f"Model: {spec.name}")
+    if model_path is not None:
+        print(f"Path: {model_path}")
+    print(f"Status: {overall_status(results)}")
+    print("Checks:")
+    for label, (status, detail) in results.items():
+        line = f"- {label}: {status}"
+        if detail:
+            line += f" ({detail})"
+        print(line)
+    print()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Validate exported embedding models before downstream evaluation.")
+    parser.add_argument(
+        "--models",
+        nargs="*",
+        choices=["word2vec", "word2vec_umls", "transformer", "transformer_umls"],
+        help="Subset of models to validate. Defaults to all.",
+    )
+    parser.add_argument(
+        "--throughput-batch-size",
+        type=int,
+        default=64,
+        help="Batch size used for the throughput timing check.",
+    )
+    parser.add_argument(
+        "--skip-throughput",
+        action="store_true",
+        help="Skip throughput timing.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    root = repo_root()
+    selected = set(args.models or ["word2vec", "word2vec_umls", "transformer", "transformer_umls"])
+    specs = [spec for spec in model_specs(root) if spec.name in selected]
+
+    failures = 0
+    for spec in specs:
+        model_path, results = validate_model(spec, args.throughput_batch_size, args.skip_throughput)
+        print_report(spec, model_path, results)
+        if overall_status(results) == "FAIL":
+            failures += 1
+
+    if failures:
+        print(f"Validation finished with {failures} failing model(s).")
+        return 1
+
+    print("Validation finished successfully.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
