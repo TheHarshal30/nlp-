@@ -16,16 +16,32 @@ WORD2VEC_TEMPLATE = """import json
 import os
 import sys
 import numpy as np
+import torch
+import torch.nn as nn
 from gensim.models import KeyedVectors
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../evaluation'))
 from base_embedder import BaseEmbedder
 
 
+class ProjectionHead(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, input_dim),
+            nn.ReLU(),
+            nn.Linear(input_dim, output_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class {class_name}(BaseEmbedder):
     def __init__(self):
         self.wv = None
         self.metadata = None
+        self.projection = None
         self._name = '{model_name}'
 
     def load(self, model_path):
@@ -34,6 +50,11 @@ class {class_name}(BaseEmbedder):
         self.wv = KeyedVectors.load_word2vec_format(weights_path, binary=True)
         with open(meta_path, 'r', encoding='utf-8') as handle:
             self.metadata = json.load(handle)
+        proj_path = os.path.join(model_path, 'weights', 'projection.pt')
+        if os.path.exists(proj_path):
+            self.projection = ProjectionHead(self.wv.vector_size, self.metadata['projection_dim'])
+            self.projection.load_state_dict(torch.load(proj_path, map_location='cpu'))
+            self.projection.eval()
 
     def encode(self, texts, batch_size=32):
         outputs = []
@@ -42,9 +63,16 @@ class {class_name}(BaseEmbedder):
             token_lists = [[tok for tok in text.lower().split() if tok in self.wv] for text in chunk]
             for toks in token_lists:
                 if not toks:
-                    outputs.append(np.zeros(self.wv.vector_size, dtype=np.float32))
+                    if self.projection is not None and self.metadata.get('use_projection_at_inference', False):
+                        vector = np.zeros(self.metadata['projection_dim'], dtype=np.float32)
+                    else:
+                        vector = np.zeros(self.wv.vector_size, dtype=np.float32)
                 else:
-                    outputs.append(np.mean([self.wv[tok] for tok in toks], axis=0).astype(np.float32))
+                    vector = np.mean([self.wv[tok] for tok in toks], axis=0).astype(np.float32)
+                    if self.projection is not None and self.metadata.get('use_projection_at_inference', False):
+                        tensor = torch.from_numpy(vector).unsqueeze(0)
+                        vector = self.projection(tensor).squeeze(0).detach().cpu().numpy().astype(np.float32)
+                outputs.append(vector)
         return np.vstack(outputs).astype(np.float32)
 
     @property
@@ -250,22 +278,39 @@ def copy_model_to_medbench(source_dir: Path, destination_dir: Path, canonical_na
     if not meta_path.exists():
         raise MedBenchIntegrationError(f"missing metadata.json in {source_dir}")
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    snapshot_path = source_dir / "config_snapshot.json"
+    snapshot_payload = None
+    if snapshot_path.exists():
+        try:
+            snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except Exception:
+            snapshot_payload = None
     for relative in required_files_for(metadata):
         if not (source_dir / relative).exists():
             raise MedBenchIntegrationError(f"missing required file for {canonical_name}: {source_dir / relative}")
 
+    # Older word2vec UMLS exports wrote a projection head but disabled it in metadata.
+    if (
+        metadata["model_type"] == "word2vec_umls"
+        and (source_dir / "weights" / "projection.pt").exists()
+        and not metadata.get("use_projection_at_inference", False)
+    ):
+        projection_enabled = True
+        if snapshot_payload is not None:
+            projection_enabled = snapshot_payload.get("alignment", {}).get("save_projected_inference", True)
+        metadata["use_projection_at_inference"] = projection_enabled
+
     if destination_dir.exists():
         shutil.rmtree(destination_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(meta_path, destination_dir / "metadata.json")
+    (destination_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
     weights_src = source_dir / "weights"
     weights_dest = destination_dir / "weights"
     shutil.copytree(weights_src, weights_dest)
 
-    snapshot = source_dir / "config_snapshot.json"
-    if snapshot.exists():
-        shutil.copy2(snapshot, destination_dir / "config_snapshot.json")
+    if snapshot_path.exists():
+        shutil.copy2(snapshot_path, destination_dir / "config_snapshot.json")
 
     checkpoints = source_dir / "checkpoints"
     if checkpoints.exists():
