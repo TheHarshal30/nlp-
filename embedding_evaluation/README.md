@@ -74,6 +74,34 @@ PYTHONPATH=. python3 embedding_evaluation/scripts/run_all \
   --config embedding_evaluation/configs/example.json
 ```
 
+## Public Dataset Preparation
+
+For publicly mirrored datasets, you can download and normalize local TSV files with:
+
+```bash
+pip install datasets
+PYTHONPATH=. python3 embedding_evaluation/scripts/prepare_public_datasets
+```
+
+This writes normalized files under:
+
+```text
+embedding_evaluation/data/public/
+├── entity_linking/
+├── nli/
+├── sts/
+└── download_summary.json
+```
+
+Current public sources used by the helper:
+
+- `ncbi/ncbi_disease`
+- `bigbio/bc5cdr`
+- `bigbio/biosses`
+- `tasksource/nli4ct`
+
+The downloader uses lightweight schema heuristics. If a source dataset changes schema, the script will need to be adjusted.
+
 ## Results
 
 Results are saved to:
