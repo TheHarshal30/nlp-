@@ -16,9 +16,12 @@ def _require_datasets():
     return load_dataset
 
 
-def _load_public_dataset(dataset_name: str):
+def _load_public_dataset(dataset_name: str, config_name: str | None = None):
     load_dataset = _require_datasets()
-    return load_dataset(dataset_name, trust_remote_code=True)
+    kwargs = {"trust_remote_code": True}
+    if config_name is not None:
+        kwargs["name"] = config_name
+    return load_dataset(dataset_name, **kwargs)
 
 
 def _write_tsv(path: Path, rows: list[list[str]]) -> None:
@@ -87,7 +90,7 @@ def _extract_entity_type(entity: dict) -> str:
 
 
 def prepare_sts_biosses(output_root: str | Path) -> dict:
-    dataset = _load_public_dataset("bigbio/biosses")
+    dataset = _load_public_dataset("bigbio/biosses", config_name="biosses_bigbio_pairs")
     rows = []
     for split_name, split in dataset.items():
         split_rows = []
@@ -114,9 +117,9 @@ def prepare_nli4ct(output_root: str | Path) -> dict:
                 label_names = feature.names
         rows = []
         for row in split:
-            premise = _first(row, ["premise", "sentence1", "context"])
-            hypothesis = _first(row, ["hypothesis", "sentence2", "statement"])
-            label = _first(row, ["label", "gold_label"])
+            premise = _first(row, ["premise", "sentence1", "context", "Primary_ct"])
+            hypothesis = _first(row, ["hypothesis", "sentence2", "statement", "Statement"])
+            label = _first(row, ["label", "gold_label", "Label"])
             if premise is None or hypothesis is None or label is None:
                 continue
             if isinstance(label, int) and label_names and 0 <= label < len(label_names):
@@ -127,8 +130,8 @@ def prepare_nli4ct(output_root: str | Path) -> dict:
     return {"dataset": "tasksource/nli4ct", "splits": written}
 
 
-def _prepare_entity_linking_dataset(dataset_name: str, output_prefix: str, output_root: str | Path) -> dict:
-    dataset = _load_public_dataset(dataset_name)
+def _prepare_entity_linking_dataset(dataset_name: str, config_name: str, output_prefix: str, output_root: str | Path) -> dict:
+    dataset = _load_public_dataset(dataset_name, config_name=config_name)
 
     kb: dict[str, str] = {}
     queries_by_type: dict[str, list[list[str]]] = {}
@@ -139,7 +142,7 @@ def _prepare_entity_linking_dataset(dataset_name: str, output_prefix: str, outpu
         split_queries_by_type: dict[str, list[list[str]]] = {}
 
         for row in split:
-            entities = row.get("entities")
+            entities = row.get("entities") or row.get("mentions")
             if not entities:
                 continue
             for entity in entities:
@@ -173,11 +176,21 @@ def _prepare_entity_linking_dataset(dataset_name: str, output_prefix: str, outpu
 
 
 def prepare_ncbi_disease(output_root: str | Path) -> dict:
-    return _prepare_entity_linking_dataset("ncbi/ncbi_disease", "ncbi_disease", output_root)
+    return _prepare_entity_linking_dataset(
+        "bigbio/ncbi_disease",
+        "ncbi_disease_bigbio_kb",
+        "ncbi_disease",
+        output_root,
+    )
 
 
 def prepare_bc5cdr(output_root: str | Path) -> dict:
-    return _prepare_entity_linking_dataset("bigbio/bc5cdr", "bc5cdr", output_root)
+    return _prepare_entity_linking_dataset(
+        "bigbio/bc5cdr",
+        "bc5cdr_bigbio_kb",
+        "bc5cdr",
+        output_root,
+    )
 
 
 def prepare_all_public_datasets(output_root: str | Path) -> dict:
