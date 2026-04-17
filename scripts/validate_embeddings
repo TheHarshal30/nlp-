@@ -54,7 +54,13 @@ def model_specs(root: Path) -> list[ModelSpec]:
                 root / "embedding_training_v2" / "outputs" / "models" / "transformer_fast",
             ],
         ),
-        ModelSpec("transformer_umls", [root / "embedding_training_v2" / "outputs" / "models" / "transformer_umls"]),
+        ModelSpec(
+            "transformer_umls",
+            [
+                root / "embedding_training_v2" / "outputs" / "models" / "transformer_umls",
+                root / "embedding_training_v2" / "outputs" / "models" / "transformer_umls_fast",
+            ],
+        ),
     ]
 
 

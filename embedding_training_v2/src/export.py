@@ -120,7 +120,8 @@ class {class_name}(BaseEmbedder):
             dropout=cfg['dropout'],
             max_length=cfg['max_length'],
         )
-        self.model.load_state_dict(torch.load(weights_path, map_location='cpu'))
+        state_dict = torch.load(weights_path, map_location='cpu')
+        self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
         proj_path = os.path.join(model_path, 'weights', 'projection.pt')
         if os.path.exists(proj_path):
