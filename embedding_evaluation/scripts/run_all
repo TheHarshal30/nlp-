@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+import argparse
+import json
+
+from embedding_evaluation.src.runner.run_all import run_all
+from embedding_evaluation.src.utils.io import read_json
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run standalone embedding evaluation tasks.")
+    parser.add_argument("--config", required=True, help="Path to evaluation config JSON.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    summary = run_all(read_json(args.config))
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

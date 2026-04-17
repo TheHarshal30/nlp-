@@ -1,0 +1,26 @@
+{
+  "model_name": "transformer_umls",
+  "model_path": "embedding_training_v2/outputs/models/transformer_umls_fast",
+  "batch_size": 64,
+  "smoke_limit": 128,
+  "entity_linking": {
+    "enabled": true,
+    "kb_path": "embedding_evaluation/data/entity_linking/kb.tsv",
+    "queries_path": "embedding_evaluation/data/entity_linking/queries.tsv",
+    "cache_dir": "embedding_evaluation/results/cache"
+  },
+  "sts": {
+    "enabled": true,
+    "pairs_path": "embedding_evaluation/data/sts/biosses.tsv"
+  },
+  "nli": {
+    "enabled": true,
+    "train_path": "embedding_evaluation/data/nli/train.tsv",
+    "dev_path": "embedding_evaluation/data/nli/dev.tsv",
+    "test_path": "embedding_evaluation/data/nli/test.tsv",
+    "epochs": 20,
+    "lr": 0.001,
+    "hidden_dim": 128,
+    "seed": 42
+  }
+}
