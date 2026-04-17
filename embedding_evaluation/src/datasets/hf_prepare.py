@@ -16,6 +16,11 @@ def _require_datasets():
     return load_dataset
 
 
+def _load_public_dataset(dataset_name: str):
+    load_dataset = _require_datasets()
+    return load_dataset(dataset_name, trust_remote_code=True)
+
+
 def _write_tsv(path: Path, rows: list[list[str]]) -> None:
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -82,8 +87,7 @@ def _extract_entity_type(entity: dict) -> str:
 
 
 def prepare_sts_biosses(output_root: str | Path) -> dict:
-    load_dataset = _require_datasets()
-    dataset = load_dataset("bigbio/biosses")
+    dataset = _load_public_dataset("bigbio/biosses")
     rows = []
     for split_name, split in dataset.items():
         split_rows = []
@@ -100,8 +104,7 @@ def prepare_sts_biosses(output_root: str | Path) -> dict:
 
 
 def prepare_nli4ct(output_root: str | Path) -> dict:
-    load_dataset = _require_datasets()
-    dataset = load_dataset("tasksource/nli4ct")
+    dataset = _load_public_dataset("tasksource/nli4ct")
     written = {}
     label_names = None
     for split_name, split in dataset.items():
@@ -125,8 +128,7 @@ def prepare_nli4ct(output_root: str | Path) -> dict:
 
 
 def _prepare_entity_linking_dataset(dataset_name: str, output_prefix: str, output_root: str | Path) -> dict:
-    load_dataset = _require_datasets()
-    dataset = load_dataset(dataset_name)
+    dataset = _load_public_dataset(dataset_name)
 
     kb: dict[str, str] = {}
     queries_by_type: dict[str, list[list[str]]] = {}
