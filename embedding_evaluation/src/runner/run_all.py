@@ -8,7 +8,8 @@ from ..utils.io import ensure_dir, write_json
 
 
 def run_all(config: dict) -> dict:
-    embedder = load_embedder(config["model_path"])
+    inference_cfg = config.get("inference", {})
+    embedder = load_embedder(config["model_path"], inference=inference_cfg)
     model_name = config.get("model_name") or getattr(embedder, "name", Path(config["model_path"]).name)
     batch_size = config.get("batch_size", 32)
     smoke_limit = config.get("smoke_limit")
@@ -23,6 +24,9 @@ def run_all(config: dict) -> dict:
             batch_size=batch_size,
             cache_dir=el_cfg.get("cache_dir"),
             smoke_limit=smoke_limit,
+            normalize=el_cfg.get("normalize", True),
+            rerank_top_k=el_cfg.get("rerank_top_k", 50),
+            rerank_alpha=el_cfg.get("rerank_alpha", 1.0),
         )
 
     sts_cfg = config.get("sts", {})
@@ -49,7 +53,8 @@ def run_all(config: dict) -> dict:
             smoke_limit=smoke_limit,
         )
 
-    results["model"] = {"name": model_name, "path": config["model_path"]}
-    output_path = ensure_dir("embedding_evaluation/results") / f"{model_name}.json"
+    mode = inference_cfg.get("inference_mode") or ("projected" if inference_cfg.get("use_projection") else "base")
+    results["model"] = {"name": model_name, "path": config["model_path"], "mode": mode}
+    output_path = ensure_dir("embedding_evaluation/results") / f"{model_name}_{mode}.json"
     write_json(output_path, results)
     return {"output_path": str(output_path), "results": results}

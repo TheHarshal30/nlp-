@@ -3,11 +3,18 @@
   "model_path": "embedding_training_v2/outputs/models/transformer_umls_fast",
   "batch_size": 64,
   "smoke_limit": 256,
+  "inference": {
+    "inference_mode": "projected",
+    "use_projection": true
+  },
   "entity_linking": {
     "enabled": true,
     "kb_path": "embedding_evaluation/data/public/entity_linking/ncbi_disease_kb.tsv",
     "queries_path": "embedding_evaluation/data/public/entity_linking/ncbi_disease_test_queries.tsv",
-    "cache_dir": "embedding_evaluation/results/cache"
+    "cache_dir": "embedding_evaluation/results/cache",
+    "normalize": true,
+    "rerank_top_k": 50,
+    "rerank_alpha": 1.0
   },
   "sts": {
     "enabled": true,
