@@ -130,5 +130,17 @@ def train_alignment_task(config: dict) -> None:
     keyed_vectors_path = None
     if config["alignment"]["base_model_type"] == "word2vec":
         keyed_vectors_path = str(Path(config["alignment"]["base_model_dir"]) / "weights" / "vectors.bin")
+    if config.get("enhanced"):
+        required = [
+            config["data"].get("umls_mrconso"),
+            config["data"].get("umls_mrsty"),
+            config["data"].get("umls_mrrel"),
+        ]
+        missing = [path for path in required if not path or not Path(path).exists()]
+        if missing:
+            raise FileNotFoundError(
+                "Enhanced Word2Vec alignment requires MRCONSO/MRSTY/MRREL files. "
+                f"Missing: {', '.join(missing)}"
+            )
     ensure_common_artifacts(config, require_umls_pairs=True, keyed_vectors_path=keyed_vectors_path)
     train_alignment(config, context, export_alignment_model)

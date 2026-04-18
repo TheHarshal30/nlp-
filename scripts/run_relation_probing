@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+from embedding_evaluation.relation_probing.link_prediction import evaluate_link_prediction
+from embedding_evaluation.relation_probing.relational_retrieval import evaluate_relational_retrieval
+from embedding_evaluation.relation_probing.type_classification import evaluate_type_classification
+from embedding_evaluation.src.models.loader import load_embedder
+from embedding_evaluation.src.utils.io import ensure_dir, write_json
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run relation probing tasks for one or more exported models.")
+    parser.add_argument("--model", action="append", required=True, help="Format: name=path")
+    parser.add_argument("--cui-to-type", default="embedding_training_v2/data/cui_to_type.json")
+    parser.add_argument("--relation-pairs", default="embedding_training_v2/data/relation_pairs.json")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    results = {}
+    for item in args.model:
+        name, path = item.split("=", 1)
+        embedder = load_embedder(path)
+        results[name] = {
+            "type_classification": evaluate_type_classification(embedder, args.cui_to_type),
+            "relational_retrieval": evaluate_relational_retrieval(embedder, args.relation_pairs),
+            "link_prediction": evaluate_link_prediction(embedder, args.relation_pairs),
+        }
+        write_json(Path("results") / f"{name}.json", results[name])
+
+    comparison = []
+    for name, payload in results.items():
+        comparison.append(
+            {
+                "model": name,
+                "type_f1": payload["type_classification"]["macro_f1"],
+                "p@20": payload["relational_retrieval"]["precision@20"],
+                "mrr": payload["relational_retrieval"]["mrr"],
+                "auc": payload["link_prediction"]["roc_auc"],
+            }
+        )
+    ensure_dir("results")
+    write_json("results/relation_probing_comparison.json", {"models": comparison})
+    print(json.dumps({"models": comparison}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

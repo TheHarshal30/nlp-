@@ -54,16 +54,17 @@ class {class_name}(BaseEmbedder):
 
     def encode(self, texts, batch_size=32):
         outputs = []
+        mode = self.metadata.get('inference_mode', 'projected' if self.metadata.get('use_projection_at_inference', False) else 'base')
         for text in texts:
             toks = [tok for tok in text.lower().split() if tok in self.wv]
             if not toks:
-                if self.projection is not None and self.metadata.get('use_projection_at_inference', False):
+                if self.projection is not None and mode == 'projected':
                     vector = np.zeros(self.metadata['projection_dim'], dtype=np.float32)
                 else:
                     vector = np.zeros(self.wv.vector_size, dtype=np.float32)
             else:
                 vector = np.mean([self.wv[tok] for tok in toks], axis=0).astype(np.float32)
-                if self.projection is not None and self.metadata.get('use_projection_at_inference', False):
+                if self.projection is not None and mode == 'projected':
                     tensor = torch.from_numpy(vector).unsqueeze(0)
                     vector = self.projection(tensor).squeeze(0).detach().cpu().numpy().astype(np.float32)
             outputs.append(vector)
@@ -242,13 +243,19 @@ def export_alignment_model(config: dict, context, artifacts) -> None:
         kv = KeyedVectors(vector_size=artifacts.adapter.embedding_dim)
         kv.add_vectors(artifacts.adapter.tokens, artifacts.adapter.embedding.weight.detach().cpu().numpy())
         kv.save_word2vec_format(str(weights / "vectors.bin"), binary=True)
+        kv.save_word2vec_format(str(weights / "word2vec.bin"), binary=True)
         torch.save(artifacts.head.state_dict(), weights / "projection.pt")
+        torch.save(artifacts.head.state_dict(), weights / "projection_head.pt")
+        if artifacts.type_classifier is not None:
+            torch.save(artifacts.type_classifier.state_dict(), weights / "type_classifier.pt")
         write_json(root / "metadata.json", {
             "model_name": config["run_name"],
-            "model_type": "word2vec_umls",
+            "model_type": "word2vec_umls_enhanced" if artifacts.type_classifier is not None else "word2vec_umls",
             "vector_dim": artifacts.adapter.embedding_dim,
             "projection_dim": align_cfg["projection_dim"],
             "use_projection_at_inference": align_cfg.get("save_projected_inference", True),
+            "inference_mode": "projected" if align_cfg.get("save_projected_inference", True) else "base",
+            "type_vocab": artifacts.type_payload["type_vocab"] if artifacts.type_payload else None,
         })
         (root / "model.py").write_text(
             WORD2VEC_TEMPLATE.format(class_name="Word2VecUMLSEmbedder", model_name=config["run_name"]),
