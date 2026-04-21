@@ -56,7 +56,7 @@ class UMLSPairDataset(Dataset):
         return self.pairs[idx]
 
 
-class EnhancedWord2VecDataset(Dataset):
+class EnhancedUMLSDataset(Dataset):
     def __init__(self, pairs_path: str, relation_pairs_path: str, relation_sampling_ratio: float, relation_types: list[str]):
         self.synonym_pairs = UMLSPairDataset(pairs_path).pairs
         payload = json_load(Path(relation_pairs_path))
@@ -224,23 +224,26 @@ def train_alignment(config: dict, context, export_fn) -> None:
         projection_dim=align_cfg["projection_dim"],
         freeze_base=align_cfg["freeze_base"],
     )
-    if enhanced_cfg and align_cfg["base_model_type"] == "word2vec":
-        vectors_path = str(Path(align_cfg["base_model_dir"]) / "weights" / "vectors.bin")
+    if enhanced_cfg:
+        if align_cfg["base_model_type"] == "word2vec":
+            vocab_source_path = str(Path(align_cfg["base_model_dir"]) / "weights" / "vectors.bin")
+        else:
+            vocab_source_path = str(Path(align_cfg["base_model_dir"]) / "weights" / "vocab.json")
         type_payload = build_cui_to_type(
             mrsty_path=config["data"]["umls_mrsty"],
             mrconso_path=config["data"]["umls_mrconso"],
-            vectors_path=vectors_path,
+            vocab_source_path=vocab_source_path,
             output_path=config["data"]["cui_to_type_json"],
             max_types=enhanced_cfg.get("max_types", 30),
         )
         build_relation_pairs(
             mrrel_path=config["data"]["umls_mrrel"],
             mrconso_path=config["data"]["umls_mrconso"],
-            vectors_path=vectors_path,
+            vocab_source_path=vocab_source_path,
             output_path=config["data"]["relation_pairs_json"],
             relation_types=enhanced_cfg.get("relation_types"),
         )
-        dataset = EnhancedWord2VecDataset(
+        dataset = EnhancedUMLSDataset(
             config["data"]["pairs_txt"],
             config["data"]["relation_pairs_json"],
             relation_sampling_ratio=enhanced_cfg.get("relation_sampling_ratio", 0.3),
@@ -270,7 +273,7 @@ def train_alignment(config: dict, context, export_fn) -> None:
         if checkpoint is not None:
             artifacts.head.load_state_dict(checkpoint["head"])
             artifacts.adapter.load_state_dict(checkpoint["adapter"], strict=False)
-            if artifacts.type_classifier is not None and "type_classifier" in checkpoint:
+            if artifacts.type_classifier is not None and "type_classifier" in checkpoint and checkpoint["type_classifier"] is not None:
                 artifacts.type_classifier.load_state_dict(checkpoint["type_classifier"])
             optimiser.load_state_dict(checkpoint["optim"])
             start_epoch = checkpoint["epoch"] + 1

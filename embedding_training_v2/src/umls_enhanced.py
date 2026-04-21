@@ -23,8 +23,14 @@ def _term_in_vocab(text: str, vocab: set[str]) -> bool:
     return any(token in vocab for token in _normalize_text(text).split())
 
 
-def load_word2vec_vocab(vectors_path: str) -> set[str]:
-    kv = KeyedVectors.load_word2vec_format(vectors_path, binary=True)
+def load_encoder_vocab(vocab_source_path: str) -> set[str]:
+    path = Path(vocab_source_path)
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        special = payload.get("special_tokens", [])
+        tokens = payload.get("tokens", [])
+        return {token for token in [*special, *tokens] if token}
+    kv = KeyedVectors.load_word2vec_format(str(path), binary=True)
     return set(kv.key_to_index.keys())
 
 
@@ -55,11 +61,11 @@ def load_mrconso_maps(mrconso_path: str, vocab: set[str]) -> tuple[dict[str, lis
 def build_cui_to_type(
     mrsty_path: str,
     mrconso_path: str,
-    vectors_path: str,
+    vocab_source_path: str,
     output_path: str,
     max_types: int = 30,
 ) -> dict:
-    vocab = load_word2vec_vocab(vectors_path)
+    vocab = load_encoder_vocab(vocab_source_path)
     cui_to_terms, term_to_cuis = load_mrconso_maps(mrconso_path, vocab)
     cui_types: dict[str, list[str]] = defaultdict(list)
     type_counter: Counter[str] = Counter()
@@ -103,12 +109,12 @@ def build_cui_to_type(
 def build_relation_pairs(
     mrrel_path: str,
     mrconso_path: str,
-    vectors_path: str,
+    vocab_source_path: str,
     output_path: str,
     relation_types: list[str] | None = None,
 ) -> list[dict]:
     relation_types = set(relation_types or ALLOWED_RELATIONS)
-    vocab = load_word2vec_vocab(vectors_path)
+    vocab = load_encoder_vocab(vocab_source_path)
     cui_to_terms, _ = load_mrconso_maps(mrconso_path, vocab)
     pairs = []
     seen = set()

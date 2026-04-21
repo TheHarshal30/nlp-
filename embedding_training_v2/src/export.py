@@ -159,6 +159,7 @@ class {class_name}(BaseEmbedder):
             self.projection.eval()
 
     def encode(self, texts, batch_size=32):
+        mode = self.metadata.get('inference_mode', 'projected' if self.metadata.get('use_projection_at_inference', False) else 'base')
         pad_id = self.vocab['[PAD]']
         cls_id = self.vocab['[CLS]']
         unk_id = self.vocab['[UNK]']
@@ -186,7 +187,7 @@ class {class_name}(BaseEmbedder):
             else:
                 mask = attention_mask.unsqueeze(-1)
                 pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
-            if self.projection is not None and self.metadata.get('use_projection_at_inference', False):
+            if self.projection is not None and mode == 'projected':
                 pooled = self.projection(pooled)
             outputs.append(pooled.detach().cpu().numpy().astype(np.float32))
         return np.vstack(outputs).astype(np.float32)
@@ -266,15 +267,20 @@ def export_alignment_model(config: dict, context, artifacts) -> None:
         vocab_src = Path(align_cfg["base_model_dir"]) / "weights" / "vocab.json"
         shutil.copyfile(vocab_src, weights / "vocab.json")
         torch.save(artifacts.head.state_dict(), weights / "projection.pt")
+        torch.save(artifacts.head.state_dict(), weights / "projection_head.pt")
+        if artifacts.type_classifier is not None:
+            torch.save(artifacts.type_classifier.state_dict(), weights / "type_classifier.pt")
         base_meta = Path(align_cfg["base_model_dir"]) / "metadata.json"
         base_payload = json.loads(base_meta.read_text(encoding="utf-8"))
         write_json(root / "metadata.json", {
             "model_name": config["run_name"],
-            "model_type": "transformer_umls",
+            "model_type": "transformer_umls_enhanced" if artifacts.type_classifier is not None else "transformer_umls",
             "model_config": base_payload["model_config"],
             "projection_dim": align_cfg["projection_dim"],
             "pooling": base_payload.get("pooling", "cls"),
             "use_projection_at_inference": align_cfg.get("save_projected_inference", True),
+            "inference_mode": "projected" if align_cfg.get("save_projected_inference", True) else "base",
+            "type_vocab": artifacts.type_payload["type_vocab"] if artifacts.type_payload else None,
         })
         (root / "model.py").write_text(
             TRANSFORMER_TEMPLATE.format(class_name="TransformerUMLSEmbedder", model_name=config["run_name"]),

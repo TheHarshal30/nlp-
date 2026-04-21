@@ -139,7 +139,7 @@ def train_alignment_task(config: dict) -> None:
         missing = [path for path in required if not path or not Path(path).exists()]
         if missing:
             raise FileNotFoundError(
-                "Enhanced Word2Vec alignment requires MRCONSO/MRSTY/MRREL files. "
+                "Enhanced alignment requires MRCONSO/MRSTY/MRREL files. "
                 f"Missing: {', '.join(missing)}"
             )
     ensure_common_artifacts(config, require_umls_pairs=True, keyed_vectors_path=keyed_vectors_path)
