@@ -235,7 +235,59 @@ A successful run is not just “training completed.” It means:
   - relation retrieval quality
   - entity-linking sensitivity
 
-## 12) Entry points (practical)
+## 12) Empirical results snapshot
+
+The following results summarize the latest runs shared in this project context.
+
+### 12.1 Standalone downstream evaluation (`embedding_evaluation`)
+
+These metrics come from the standalone evaluator (`entity_linking` + `sts`) on the configured smoke/public splits.
+
+| Model | Entity Linking Acc@1 | Entity Linking Acc@5 | Entity Linking MRR | STS Pearson |
+|---|---:|---:|---:|---:|
+| `word2vec` | 0.21875 | 0.43750 | 0.32524 | 0.60434 |
+| `word2vec_umls` | 0.21875 | 0.43750 | 0.32524 | 0.60434 |
+| `transformer` | 0.23438 | 0.46094 | 0.34486 | 0.19218 |
+| `transformer_umls` | 0.23438 | 0.43750 | 0.33637 | 0.47289 |
+
+Interpretation:
+
+- `word2vec` and `word2vec_umls` were identical in this run, which indicates no practical downstream effect from the old Word2Vec alignment export in that evaluation mode.
+- `transformer_umls` strongly improved STS versus `transformer` (higher semantic similarity correlation).
+- Transformer entity-linking differences were modest and mixed, showing that alignment gains are task-dependent.
+
+### 12.2 Relation probing (`scripts/run_relation_probing`)
+
+These metrics evaluate type and relational structure directly.
+
+| Model | Type F1 | P@20 | MRR | AUC |
+|---|---:|---:|---:|---:|
+| `word2vec` | 0.49311 | 0.02022 | 0.21127 | 0.62464 |
+| `word2vec_umls` | 0.49429 | 0.02022 | 0.21127 | 0.62464 |
+| `enhanced` (`word2vec_umls_enhanced`) | 0.38857 | 0.03658 | 0.40700 | 0.71501 |
+
+Interpretation:
+
+- `enhanced` substantially improves relation-centric metrics (`P@20`, `MRR`, `AUC`) over both Word2Vec baselines.
+- Type macro-F1 dropped for `enhanced`, indicating the current loss balance favors relational structure more than type separability.
+- This is an expected tradeoff direction for the present hyperparameter setting (`relation_sampling_ratio`, `type_loss_weight`, warmup schedule).
+
+### 12.3 Projection sanity (Word2Vec UMLS)
+
+After enabling projected inference correctly:
+
+- base shape: `(3, 300)`
+- projected shape: `(3, 256)`
+- base similarities: related `0.48665`, unrelated `0.32470`
+- projected similarities: related `0.21065`, unrelated `0.32129`
+
+Interpretation:
+
+- projection is active and changes geometry (different dimensionality and scores)
+- but the old `word2vec_umls` projected space is still not clearly better on simple related/unrelated sanity pairs
+- `word2vec_umls_enhanced` is currently the stronger relation-aware variant
+
+## 13) Entry points (practical)
 
 Train:
 
