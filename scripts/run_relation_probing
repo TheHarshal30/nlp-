@@ -15,6 +15,11 @@ def parse_args():
     parser.add_argument("--model", action="append", required=True, help="Format: name=path")
     parser.add_argument("--cui-to-type", default="embedding_training_v2/data/cui_to_type.json")
     parser.add_argument("--relation-pairs", default="embedding_training_v2/data/relation_pairs.json")
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--type-epochs", type=int, default=10)
+    parser.add_argument("--max-type-examples", type=int, default=0, help="0 means no limit")
+    parser.add_argument("--max-relation-queries", type=int, default=0, help="0 means no limit")
+    parser.add_argument("--max-link-pairs", type=int, default=0, help="0 means no limit")
     return parser.parse_args()
 
 
@@ -23,13 +28,37 @@ def main() -> int:
     results = {}
     for item in args.model:
         name, path = item.split("=", 1)
+        print(f"[{name}] loading embedder from {path} ...", flush=True)
         embedder = load_embedder(path)
+        print(f"[{name}] running type classification ...", flush=True)
+        type_result = evaluate_type_classification(
+            embedder,
+            args.cui_to_type,
+            batch_size=args.batch_size,
+            epochs=args.type_epochs,
+            max_examples=(args.max_type_examples or None),
+        )
+        print(f"[{name}] running relational retrieval ...", flush=True)
+        retrieval_result = evaluate_relational_retrieval(
+            embedder,
+            args.relation_pairs,
+            batch_size=args.batch_size,
+            max_queries=(args.max_relation_queries or None),
+        )
+        print(f"[{name}] running link prediction ...", flush=True)
+        link_result = evaluate_link_prediction(
+            embedder,
+            args.relation_pairs,
+            batch_size=args.batch_size,
+            max_pairs=(args.max_link_pairs or None),
+        )
         results[name] = {
-            "type_classification": evaluate_type_classification(embedder, args.cui_to_type),
-            "relational_retrieval": evaluate_relational_retrieval(embedder, args.relation_pairs),
-            "link_prediction": evaluate_link_prediction(embedder, args.relation_pairs),
+            "type_classification": type_result,
+            "relational_retrieval": retrieval_result,
+            "link_prediction": link_result,
         }
         write_json(Path("results") / f"{name}.json", results[name])
+        print(f"[{name}] done", flush=True)
 
     comparison = []
     for name, payload in results.items():

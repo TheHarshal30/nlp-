@@ -19,7 +19,12 @@ def _normalize(x: np.ndarray) -> np.ndarray:
     return x / np.clip(np.linalg.norm(x, axis=1, keepdims=True), 1e-12, None)
 
 
-def evaluate_relational_retrieval(embedder, relation_pairs_path: str, batch_size: int = 64) -> dict:
+def evaluate_relational_retrieval(
+    embedder,
+    relation_pairs_path: str,
+    batch_size: int = 64,
+    max_queries: int | None = None,
+) -> dict:
     rows = json.loads(Path(relation_pairs_path).read_text(encoding="utf-8"))
     grouped = defaultdict(list)
     for row in rows:
@@ -41,11 +46,17 @@ def evaluate_relational_retrieval(embedder, relation_pairs_path: str, batch_size
     by_anchor = defaultdict(list)
     for row in test_rows:
         by_anchor[row["anchor_text"]].append(row["positive_text"])
+    anchor_texts = sorted(by_anchor.keys())
+    if max_queries is not None and max_queries > 0 and len(anchor_texts) > max_queries:
+        anchor_texts = anchor_texts[:max_queries]
+        by_anchor = {anchor: by_anchor[anchor] for anchor in anchor_texts}
 
     precisions = []
     rr = []
-    for anchor_text, positives in by_anchor.items():
-        anchor_emb = _normalize(embedder.encode([anchor_text], batch_size=1))[0]
+    anchor_embeddings = _normalize(embedder.encode(anchor_texts, batch_size=batch_size))
+    for idx, anchor_text in enumerate(anchor_texts):
+        positives = by_anchor[anchor_text]
+        anchor_emb = anchor_embeddings[idx]
         scores = candidate_emb @ anchor_emb
         ranking = np.argsort(-scores)
         positive_set = {candidate_index[text] for text in positives if text in candidate_index}

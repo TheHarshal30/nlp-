@@ -50,7 +50,14 @@ class TypeProbe(nn.Module):
         return self.linear(x)
 
 
-def evaluate_type_classification(embedder, cui_to_type_path: str, batch_size: int = 64, epochs: int = 15, lr: float = 1e-3) -> dict:
+def evaluate_type_classification(
+    embedder,
+    cui_to_type_path: str,
+    batch_size: int = 64,
+    epochs: int = 15,
+    lr: float = 1e-3,
+    max_examples: int | None = None,
+) -> dict:
     payload = json.loads(Path(cui_to_type_path).read_text(encoding="utf-8"))
     type_vocab = payload["type_vocab"]
     type_to_index = payload["type_to_index"]
@@ -59,6 +66,9 @@ def evaluate_type_classification(embedder, cui_to_type_path: str, batch_size: in
         for text in payload["cui_to_terms"].get(cui, [])[:1]:
             rows.append({"text": text, "types": types})
     texts, labels = _multi_hot(rows, type_to_index)
+    if max_examples is not None and max_examples > 0 and len(texts) > max_examples:
+        texts = texts[:max_examples]
+        labels = labels[:max_examples]
     if len(texts) < 10:
         return {"macro_f1": 0.0, "per_class_f1": {}, "examples": len(texts)}
 

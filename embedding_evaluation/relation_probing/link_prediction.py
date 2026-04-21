@@ -24,9 +24,18 @@ def _roc_auc(labels: list[int], scores: list[float]) -> float:
     return wins / total
 
 
-def evaluate_link_prediction(embedder, relation_pairs_path: str, relation_type: str = "has_manifestation", batch_size: int = 64, seed: int = 42) -> dict:
+def evaluate_link_prediction(
+    embedder,
+    relation_pairs_path: str,
+    relation_type: str = "has_manifestation",
+    batch_size: int = 64,
+    seed: int = 42,
+    max_pairs: int | None = None,
+) -> dict:
     rows = json.loads(Path(relation_pairs_path).read_text(encoding="utf-8"))
     positives = [row for row in rows if row["relation_type"] == relation_type]
+    if max_pairs is not None and max_pairs > 0 and len(positives) > max_pairs:
+        positives = positives[:max_pairs]
     if len(positives) < 2:
         return {"roc_auc": 0.0, "pairs": 0}
     candidates = sorted({row["positive_text"] for row in positives})
