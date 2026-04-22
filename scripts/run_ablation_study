@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from embedding_evaluation.relation_probing.link_prediction import evaluate_link_prediction
+from embedding_evaluation.relation_probing.relational_retrieval import evaluate_relational_retrieval
+from embedding_evaluation.relation_probing.type_classification import evaluate_type_classification
+from embedding_evaluation.src.models.loader import load_embedder
+from embedding_evaluation.src.utils.io import ensure_dir, write_json
+from embedding_training_v2.src.config import load_config
+
+
+DEFAULTS = {
+    "word2vec": {
+        "enhanced_config": "embedding_training_v2/configs/word2vec_umls_enhanced.json",
+        "trainer_script": "embedding_training_v2/scripts/train_alignment_word2vec",
+        "baseline_model_path": "embedding_training_v2/outputs/models/word2vec",
+        "umls_model_path": "embedding_training_v2/outputs/models/word2vec_umls",
+        "cui_to_type": "embedding_training_v2/data/cui_to_type.json",
+        "relation_pairs": "embedding_training_v2/data/relation_pairs.json",
+    },
+    "transformer": {
+        "enhanced_config": "embedding_training_v2/configs/transformer_umls_enhanced.json",
+        "trainer_script": "embedding_training_v2/scripts/train_alignment_transformer",
+        "baseline_model_path": "embedding_training_v2/outputs/models/transformer_fast",
+        "umls_model_path": "embedding_training_v2/outputs/models/transformer_umls_fast",
+        "cui_to_type": "embedding_training_v2/data/cui_to_type_transformer.json",
+        "relation_pairs": "embedding_training_v2/data/relation_pairs_transformer.json",
+    },
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train and evaluate enhanced-alignment ablations.")
+    parser.add_argument("--family", choices=["word2vec", "transformer"], required=True)
+    parser.add_argument("--mode", choices=["all", "train", "probe"], default="all")
+    parser.add_argument("--enhanced-config", default=None)
+    parser.add_argument("--output-root", default=None, help="Root for ablation model exports.")
+    parser.add_argument("--results-dir", default=None, help="Where to store ablation reports.")
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--type-epochs", type=int, default=10)
+    parser.add_argument("--max-type-examples", type=int, default=0)
+    parser.add_argument("--max-relation-queries", type=int, default=0)
+    parser.add_argument("--max-link-pairs", type=int, default=0)
+    parser.add_argument("--skip-existing", action="store_true")
+    return parser.parse_args()
+
+
+def build_variant_configs(base_config: dict, output_root: Path) -> dict[str, dict]:
+    enhanced = base_config.get("enhanced")
+    if not enhanced:
+        raise ValueError("Enhanced config must contain an `enhanced` section for ablation.")
+
+    variants = {
+        "synonym_only": {"type_loss_weight": 0.0, "relation_sampling_ratio": 0.0},
+        "synonym_plus_type": {"relation_sampling_ratio": 0.0},
+        "synonym_plus_relation": {"type_loss_weight": 0.0},
+        "full_enhanced": {},
+    }
+
+    output = {}
+    for name, overrides in variants.items():
+        cfg = copy.deepcopy(base_config)
+        cfg["run_name"] = f"{base_config['run_name']}_{name}"
+        cfg["enhanced"].update(overrides)
+        cfg["output"]["root"] = str(output_root / name)
+        output[name] = cfg
+    return output
+
+
+def write_variant_configs(variant_configs: dict[str, dict], config_root: Path) -> dict[str, Path]:
+    ensure_dir(config_root)
+    paths = {}
+    for name, cfg in variant_configs.items():
+        path = config_root / f"{name}.json"
+        path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        paths[name] = path
+    return paths
+
+
+def run_training(script_path: str, config_paths: dict[str, Path], skip_existing: bool = False) -> None:
+    for name, config_path in config_paths.items():
+        cfg = load_config(str(config_path))
+        output_root = Path(cfg["output"]["root"])
+        model_file = output_root / "model.py"
+        if skip_existing and model_file.exists():
+            print(f"[train:{name}] skipping existing model at {output_root}")
+            continue
+        print(f"[train:{name}] running {script_path} --config {config_path}")
+        subprocess.run([sys.executable, script_path, "--config", str(config_path)], check=True)
+
+
+def run_probe(
+    model_paths: dict[str, str],
+    cui_to_type: str,
+    relation_pairs: str,
+    batch_size: int,
+    type_epochs: int,
+    max_type_examples: int,
+    max_relation_queries: int,
+    max_link_pairs: int,
+) -> dict:
+    results = {}
+    for name, path in model_paths.items():
+        print(f"[probe:{name}] loading {path}")
+        embedder = load_embedder(path)
+        print(f"[probe:{name}] type classification")
+        type_result = evaluate_type_classification(
+            embedder,
+            cui_to_type,
+            batch_size=batch_size,
+            epochs=type_epochs,
+            max_examples=(max_type_examples or None),
+        )
+        print(f"[probe:{name}] relational retrieval")
+        retrieval_result = evaluate_relational_retrieval(
+            embedder,
+            relation_pairs,
+            batch_size=batch_size,
+            max_queries=(max_relation_queries or None),
+        )
+        print(f"[probe:{name}] link prediction")
+        link_result = evaluate_link_prediction(
+            embedder,
+            relation_pairs,
+            batch_size=batch_size,
+            max_pairs=(max_link_pairs or None),
+        )
+        results[name] = {
+            "type_classification": type_result,
+            "relational_retrieval": retrieval_result,
+            "link_prediction": link_result,
+        }
+    return results
+
+
+def build_comparison(results: dict) -> dict:
+    rows = []
+    for name, payload in results.items():
+        rows.append(
+            {
+                "model": name,
+                "type_f1": payload["type_classification"]["macro_f1"],
+                "p@20": payload["relational_retrieval"]["precision@20"],
+                "mrr": payload["relational_retrieval"]["mrr"],
+                "auc": payload["link_prediction"]["roc_auc"],
+            }
+        )
+    return {"models": rows}
+
+
+def to_markdown_table(comparison: dict) -> str:
+    lines = [
+        "| Model | Type F1 | P@20 | MRR | AUC |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for row in comparison["models"]:
+        lines.append(
+            f"| {row['model']} | {row['type_f1']:.6f} | {row['p@20']:.6f} | {row['mrr']:.6f} | {row['auc']:.6f} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    args = parse_args()
+    defaults = DEFAULTS[args.family]
+
+    enhanced_config_path = Path(args.enhanced_config or defaults["enhanced_config"])
+    base_config = load_config(str(enhanced_config_path))
+
+    output_root = Path(args.output_root or f"embedding_training_v2/outputs/models/ablation_{args.family}")
+    results_dir = Path(args.results_dir or f"results/ablation_{args.family}")
+    ensure_dir(results_dir)
+
+    variant_configs = build_variant_configs(base_config, output_root)
+    config_paths = write_variant_configs(variant_configs, results_dir / "configs")
+
+    if args.mode in {"all", "train"}:
+        run_training(defaults["trainer_script"], config_paths, skip_existing=args.skip_existing)
+
+    if args.mode in {"all", "probe"}:
+        model_paths = {
+            f"{args.family}_baseline": defaults["baseline_model_path"],
+            f"{args.family}_umls": defaults["umls_model_path"],
+        }
+        for name, cfg in variant_configs.items():
+            model_paths[f"{args.family}_{name}"] = cfg["output"]["root"]
+
+        results = run_probe(
+            model_paths=model_paths,
+            cui_to_type=defaults["cui_to_type"],
+            relation_pairs=defaults["relation_pairs"],
+            batch_size=args.batch_size,
+            type_epochs=args.type_epochs,
+            max_type_examples=args.max_type_examples,
+            max_relation_queries=args.max_relation_queries,
+            max_link_pairs=args.max_link_pairs,
+        )
+        comparison = build_comparison(results)
+        write_json(results_dir / "raw_results.json", results)
+        write_json(results_dir / "comparison.json", comparison)
+        (results_dir / "comparison.md").write_text(to_markdown_table(comparison), encoding="utf-8")
+        print(json.dumps(comparison, indent=2))
+
+    print(f"Ablation artifacts saved at: {results_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
