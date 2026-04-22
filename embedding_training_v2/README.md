@@ -294,16 +294,86 @@ The repository now includes a dedicated ablation runner:
 
 - [run_ablation_study](/home/harshal/nlp%20project%20/TrainWord2Vec/TrainWord2Vec/scripts/run_ablation_study)
 
-It evaluates four controlled variants derived from an enhanced config:
+### 13.0 Why ablation is required
+
+Baseline-vs-enhanced comparisons tell you **whether** gains exist, but not **which supervision signal caused them**. In this project, enhanced alignment mixes:
+
+- synonym contrastive signal
+- semantic type supervision
+- relation-pair augmentation
+
+Ablation isolates these components so conclusions are causal, not anecdotal.
+
+### 13.1 Controlled variants and what they test
+
+The runner derives four variants from a single enhanced config:
 
 - `synonym_only`
 - `synonym_plus_type`
 - `synonym_plus_relation`
 - `full_enhanced`
 
-This lets you attribute gains to each training signal instead of comparing only baseline vs final.
+Meaning of each variant:
 
-### 13.1 Word2Vec ablation
+- `synonym_only`:
+  - relation sampling disabled
+  - type loss disabled
+  - measures pure synonym contrastive alignment
+- `synonym_plus_type`:
+  - relation sampling disabled
+  - type loss enabled
+  - isolates contribution of type supervision
+- `synonym_plus_relation`:
+  - relation sampling enabled
+  - type loss disabled
+  - isolates contribution of relation augmentation
+- `full_enhanced`:
+  - relation sampling enabled
+  - type loss enabled
+  - captures interaction effects between type and relation signals
+
+### 13.2 Experimental controls (important for fair attribution)
+
+Keep these fixed across variants:
+
+- same base checkpoint (`word2vec` or `transformer_fast`)
+- same train/validation data artifacts
+- same batch size, optimizer, lr, epochs
+- same probe settings (`batch_size`, `type_epochs`, limits)
+- same seed (or same list of seeds if doing stability runs)
+
+Only the ablation switches should change.
+
+### 13.3 Hypotheses to test
+
+Expected directional behavior:
+
+- if type supervision helps: `synonym_plus_type` > `synonym_only` on Type F1
+- if relation augmentation helps: `synonym_plus_relation` > `synonym_only` on P@20 / MRR / AUC
+- if signals are complementary: `full_enhanced` best overall
+- if signals conflict: one metric family improves while another drops
+
+### 13.4 Metrics and interpretation map
+
+The ablation report focuses on:
+
+- `type_f1`: semantic type separability
+- `p@20`: quality of top-k relational retrieval
+- `mrr`: ranking quality for positives
+- `auc`: binary link discrimination
+
+How to interpret common patterns:
+
+- `type_f1` up, retrieval flat:
+  - classifier signal learned, relation geometry not improved
+- retrieval up, `type_f1` down:
+  - relation constraints dominate type structure
+- all up:
+  - desirable regime, signals likely synergistic
+- all flat:
+  - likely inference mismatch, stale export, or weak supervision
+
+### 13.5 Word2Vec ablation (full run)
 
 ```bash
 PYTHONPATH=. python3 scripts/run_ablation_study \
@@ -313,7 +383,7 @@ PYTHONPATH=. python3 scripts/run_ablation_study \
   --type-epochs 10
 ```
 
-### 13.2 Transformer ablation
+### 13.6 Transformer ablation (full run)
 
 ```bash
 PYTHONPATH=. python3 scripts/run_ablation_study \
@@ -323,7 +393,36 @@ PYTHONPATH=. python3 scripts/run_ablation_study \
   --type-epochs 10
 ```
 
-### 13.3 Fast smoke ablation
+### 13.7 Split execution modes
+
+Train only:
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family word2vec \
+  --mode train
+```
+
+Probe only (re-use already trained ablation exports):
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family word2vec \
+  --mode probe \
+  --batch-size 256 \
+  --type-epochs 10
+```
+
+Skip models that already exist:
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family transformer \
+  --mode train \
+  --skip-existing
+```
+
+### 13.8 Fast smoke ablation
 
 ```bash
 PYTHONPATH=. python3 scripts/run_ablation_study \
@@ -335,7 +434,7 @@ PYTHONPATH=. python3 scripts/run_ablation_study \
   --max-link-pairs 3000
 ```
 
-### 13.4 Ablation outputs
+### 13.9 Ablation outputs
 
 - Per-family model exports:
   - `embedding_training_v2/outputs/models/ablation_word2vec/`
@@ -345,6 +444,17 @@ PYTHONPATH=. python3 scripts/run_ablation_study \
   - `results/ablation_word2vec/comparison.md`
   - `results/ablation_transformer/comparison.json`
   - `results/ablation_transformer/comparison.md`
+
+`comparison.json` is machine-friendly; `comparison.md` is report-ready.
+
+### 13.10 Recommended reporting template
+
+For each family, present:
+
+1. one ablation table (`synonym_only`, `synonym_plus_type`, `synonym_plus_relation`, `full_enhanced`)
+2. one short paragraph on which signal drove the largest gain
+3. one short paragraph on tradeoff (for example type vs relation)
+4. optional 3-seed mean/std table for the best two variants
 
 ## 14) Entry points (practical)
 
