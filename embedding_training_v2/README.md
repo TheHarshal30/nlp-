@@ -44,9 +44,9 @@ For aligned models, training uses NT-Xent contrastive loss over positive pairs:
 
 This creates a geometry where UMLS-confirmed concept pairs are more consistently close.
 
-### Enhanced objective (Word2Vec only)
+### Enhanced objective (Word2Vec and Transformer)
 
-`word2vec_umls_enhanced` combines three signals:
+Enhanced aligned models (`word2vec_umls_enhanced`, `transformer_umls_enhanced`) combine three signals:
 
 - synonym contrastive loss (retain lexical equivalence)
 - relation-pair contrastive augmentation (inject cross-concept structure)
@@ -112,6 +112,7 @@ Operational reliability layer.
 - `debug_alignment_effect`: verifies base vs projected behavior is numerically different when expected
 - MedBench integration helpers for external benchmark flow
 - `run_relation_probing`: runs type/relation probes and writes comparison tables
+- `run_ablation_study`: trains and evaluates controlled ablation variants
 
 ### `embedding_evaluation/`
 
@@ -287,7 +288,65 @@ Interpretation:
 - but the old `word2vec_umls` projected space is still not clearly better on simple related/unrelated sanity pairs
 - `word2vec_umls_enhanced` is currently the stronger relation-aware variant
 
-## 13) Entry points (practical)
+## 13) Ablation study protocol
+
+The repository now includes a dedicated ablation runner:
+
+- [run_ablation_study](/home/harshal/nlp%20project%20/TrainWord2Vec/TrainWord2Vec/scripts/run_ablation_study)
+
+It evaluates four controlled variants derived from an enhanced config:
+
+- `synonym_only`
+- `synonym_plus_type`
+- `synonym_plus_relation`
+- `full_enhanced`
+
+This lets you attribute gains to each training signal instead of comparing only baseline vs final.
+
+### 13.1 Word2Vec ablation
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family word2vec \
+  --mode all \
+  --batch-size 256 \
+  --type-epochs 10
+```
+
+### 13.2 Transformer ablation
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family transformer \
+  --mode all \
+  --batch-size 256 \
+  --type-epochs 10
+```
+
+### 13.3 Fast smoke ablation
+
+```bash
+PYTHONPATH=. python3 scripts/run_ablation_study \
+  --family word2vec \
+  --mode all \
+  --type-epochs 5 \
+  --max-type-examples 3000 \
+  --max-relation-queries 500 \
+  --max-link-pairs 3000
+```
+
+### 13.4 Ablation outputs
+
+- Per-family model exports:
+  - `embedding_training_v2/outputs/models/ablation_word2vec/`
+  - `embedding_training_v2/outputs/models/ablation_transformer/`
+- Per-family reports:
+  - `results/ablation_word2vec/comparison.json`
+  - `results/ablation_word2vec/comparison.md`
+  - `results/ablation_transformer/comparison.json`
+  - `results/ablation_transformer/comparison.md`
+
+## 14) Entry points (practical)
 
 Train:
 
@@ -297,6 +356,7 @@ python embedding_training_v2/scripts/train_transformer --config embedding_traini
 python embedding_training_v2/scripts/train_alignment_word2vec --config embedding_training_v2/configs/word2vec_umls.json
 python embedding_training_v2/scripts/train_alignment_transformer --config embedding_training_v2/configs/transformer_umls.json
 python embedding_training_v2/scripts/train_alignment_word2vec --config embedding_training_v2/configs/word2vec_umls_enhanced.json
+python embedding_training_v2/scripts/train_alignment_transformer --config embedding_training_v2/configs/transformer_umls_enhanced.json
 ```
 
 Validate:
